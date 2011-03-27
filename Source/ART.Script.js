@@ -148,10 +148,12 @@ ART.Script.Group = ART.Class(ART.Script.Element, ART.Container, {
 		}));
 	},
 
+	element_toExpression: ART.Script.Element.prototype.toExpression,
+
 	toExpression: function(){
 		var grab = artGroup.construct().property('grab'),
 			children = this.children.map(function(child){ return child.toExpression(); });
-		return new AST.Call(grab, children);
+		return this.element_toExpression(new AST.Call(grab, children));
 	},
 
 	toClass: function(){
