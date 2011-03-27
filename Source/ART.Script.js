@@ -3,7 +3,7 @@
 name: ART.Script
 description: "ART Script stubs for ART"
 provides: [ART.Script, ART.Script.Group, ART.Script.Shape]
-requires: [ART, ART.Element, ART.Container, ART.Path]
+requires: [ART, ART.Element, ART.Container, ART.Color, ART.Transform, ART.Path]
 ...
 */
 
@@ -11,19 +11,18 @@ requires: [ART, ART.Element, ART.Container, ART.Path]
 
 // Global AST Variables
 
-var classVar = new AST.Variable('Class'),
-	artVar = new AST.Variable('ART'),
+var artVar = new AST.Variable('ART'),
+	classVar = artVar.property('Class'),
 	artShape = artVar.property('Shape'),
-	artGroup = artVar.property('Group');
+	artGroup = artVar.property('Group'),
+	artImage = artVar.property('Image'),
+	artText = artVar.property('Text');
 	
-Color.prototype.toExpression = Color.prototype.toHEX;
+ART.Color.prototype.toExpression = ART.Color.prototype.toHEX;
 
 // ART Script Base Class
 
-ART.Script = new Class({
-
-	Extends: ART.Element,
-	Implements: ART.Container,
+ART.Script = ART.Class(ART.Element, ART.Container, {
 
 	initialize: function(width, height){
 		this.resize(width, height);
@@ -44,11 +43,11 @@ ART.Script = new Class({
 
 	toClass: function(){
 		var self = new AST.This(),
-			callParent = self.property('parent').call(this.width, this.height);
+			callParent = self.property('art_initialize').call(this.width, this.height);
 
-		return classVar.construct({
-
-			Extends: artVar,
+		return classVar.call(artVar, {
+		
+			art_initialize: artVar.property('prototype').property('initialize'),
 
 			initialize: new AST.Function(null, null, this.children.length ? [callParent, new AST.Call(self.property('grab'), this.children)] : [callParent])
 
@@ -59,9 +58,7 @@ ART.Script = new Class({
 
 // ART Script Element Class
 
-ART.Script.Element = new Class({
-	
-	Extends: ART.Element,
+ART.Script.Element = ART.Class(ART.Element, ART.Transform, {
 
 	initialize: function(){
 		this._calls = [];
@@ -77,6 +74,18 @@ ART.Script.Element = new Class({
 		for (var i = 0, l = calls.length; i < l; i++){
 			var call = calls[i];
 			expr = new AST.Call(expr.property(call.prop), call.args);
+		}
+		if (this.xx != 1 || this.xy != 0 || this.yx != 0 || this.yy != 1){
+			expr = new AST.Call(expr.property('transform'), (this.x != 0 || this.y != 0) ? [
+				this.xx, this.xy,
+				this.yx, this.yy,
+				this.x, this.y
+			] : [
+				this.xx, this.xy,
+				this.yx, this.yy
+			]);
+		} else if (this.x != 0 || this.y != 0){
+			expr = expr.property('move').call(this.x, this.y);
 		}
 		return expr;
 	},
@@ -98,19 +107,17 @@ ART.Script.Element = new Class({
 	
 	// transforms
 	
-	rotate: function(deg, x, y){ return this._addCall('rotate', arguments); },
-
-	scale: function(x, y){ return this._addCall('scale', arguments); },
-
-	translate: function(x, y){ return this._addCall('translate', arguments); },
-	
-	setOpacity: function(opacity){ return this._addCall('setOpacity', arguments); },
+	blend: function(opacity){ return this._addCall('blend', arguments); },
 
 	// visibility
 	
 	hide: function(){ return this._addCall('hide', arguments); },
 	
 	show: function(){ return this._addCall('show', arguments); },
+	
+	// interaction
+	
+	indicate: function(){ return this._addCall('indicate', arguments); },
 	
 	// ignore
 	
@@ -126,13 +133,12 @@ ART.Script.Element = new Class({
 
 // ART Script Group Class
 
-ART.Script.Group = new Class({
+ART.Script.Group = ART.Class(ART.Script.Element, ART.Container, {
 
-	Extends: ART.Script.Element,
-	Implements: ART.Container,
+	element_initialize: ART.Script.Element.prototype.initialize,
 
 	initialize: function(){
-		this.parent();
+		this.element_initialize();
 		this.children = [];
 	},
 
@@ -150,11 +156,11 @@ ART.Script.Group = new Class({
 
 	toClass: function(){
 		var self = new AST.This(),
-			callParent = self.property('parent').call();
+			callParent = self.property('group_initialize').call();
 
-		return classVar.construct({
+		return classVar.call(artGroup, {
 
-			Extends: artGroup,
+			group_initialize: artGroup.property('prototype').property('initialize'),
 
 			initialize: new AST.Function(null, null, this.children.length ? [callParent, new AST.Call(self.property('grab'), this.children)] : [callParent])
 
@@ -165,9 +171,7 @@ ART.Script.Group = new Class({
 
 // ART Script Base Shape Class
 
-ART.Script.Base = new Class({
-	
-	Extends: ART.Script.Element,
+ART.Script.Base = ART.Class(ART.Script.Element, {
 
 	/* styles */
 	
@@ -180,48 +184,125 @@ ART.Script.Base = new Class({
 		return this._addCall('fillLinear', arguments);
 	},
 
+	fillImage: function(){ return this._addCall('fillImage', arguments); },
+
 	stroke: function(color, width, cap, join){ return this._addCall('stroke', arguments); }	
 	
 });
 
 // ART Script Shape Class
 
-ART.Script.Shape = new Class({
-	
-	Extends: ART.Script.Base,
+ART.Script.Shape = ART.Class(ART.Script.Base, {
+
+	base_initialize: ART.Script.Base.prototype.initialize,
 	
 	initialize: function(path){
-		this.parent('path');
+		this.base_initialize();
 		if (path != null) this.draw(path);
 	},
 	
-	getPath: function(){
-		return this.currentPath || new ART.Path;
-	},
-	
-	draw: function(path){
-		this.currentPath = (path instanceof ART.Path) ? path : new ART.Path(path);
+	draw: function(path, width, height){
+		path = ((path instanceof ART.Path) ? path : new ART.Path(path)).toString()
+		this.args = arguments.length < 3 ? [ path ] : [ path, width, height ];
 		return this;
 	},
 	
-	measure: function(){
-		return this.getPath().measure();
-	},
+	base_toExpression: ART.Script.Base.prototype.toExpression,
 
 	toExpression: function(expr){
-		if (!expr) expr = this.currentPath ? artShape.construct(this.currentPath.toString()) : artShape.construct();
-		return this.parent(expr);
+		if (!expr) expr = this.args ? new AST.New(artShape, this.args) : artShape.construct();
+		return this.base_toExpression(expr);
 	},
 
 	toClass: function(){
 		var self = new AST.This(),
-			parent = self.property('parent'),
-			callParent = this.currentPath ? parent.call(this.currentPath.toString()) : parent.call(),
+			parent = self.property('shape_initialize'),
+			callParent = this.args ? new AST.Call(parent, this.args) : parent.call(),
 			callMethods = this.toExpression(self);
 
-		return classVar.construct({
+		return classVar.call(artShape, {
 
-			Extends: artShape,
+			shape_initialize: artShape.property('prototype').property('initialize'),
+
+			initialize: new AST.Function(null, null, callMethods === self ? [callParent] : [callParent, callMethods])
+
+		});
+	}
+
+});
+
+// ART Script Image Class
+
+ART.Script.Image = ART.Class(ART.Script.Base, {
+
+	base_initialize: ART.Script.Base.prototype.initialize,
+	
+	initialize: function(src, width, height){
+		this.base_initialize();
+		if (src != null) this.draw.apply(this, arguments);
+	},
+	
+	draw: function(){
+		this.args = Array.prototype.slice.call(arguments);
+		return this;
+	},
+	
+	base_toExpression: ART.Script.Base.prototype.toExpression,
+
+	toExpression: function(expr){
+		if (!expr) expr = this.args ? new AST.New(artImage, this.args) : artImage.construct();
+		return this.base_toExpression(expr);
+	},
+
+	toClass: function(){
+		var self = new AST.This(),
+			parent = self.property('image_initialize'),
+			callParent = this.args ? new AST.Call(parent, this.args) : parent.call(),
+			callMethods = this.toExpression(self);
+
+		return classVar.call(artImage, {
+
+			image_initialize: artImage.property('prototype').property('initialize'),
+
+			initialize: new AST.Function(null, null, callMethods === self ? [callParent] : [callParent, callMethods])
+
+		});
+	}
+
+});
+
+// ART Script Text Class
+
+ART.Script.Text = ART.Class(ART.Script.Base, {
+
+	base_initialize: ART.Script.Base.prototype.initialize,
+	
+	initialize: function(text){
+		this.base_initialize();
+		if (text != null) this.draw.apply(this, arguments);
+	},
+	
+	draw: function(){
+		this.args = Array.prototype.slice.call(arguments);
+		return this;
+	},
+	
+	base_toExpression: ART.Script.Base.prototype.toExpression,
+
+	toExpression: function(expr){
+		if (!expr) expr = this.args ? new AST.New(artText, this.args) : artText.construct();
+		return this.base_toExpression(expr);
+	},
+
+	toClass: function(){
+		var self = new AST.This(),
+			parent = self.property('text_initialize'),
+			callParent = this.args ? new AST.Call(parent, this.args) : parent.call(),
+			callMethods = this.toExpression(self);
+
+		return classVar.call(artText, {
+
+			text_initialize: artText.property('prototype').property('initialize'),
 
 			initialize: new AST.Function(null, null, callMethods === self ? [callParent] : [callParent, callMethods])
 
